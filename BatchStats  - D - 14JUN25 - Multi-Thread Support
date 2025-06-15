@@ -1,9 +1,9 @@
 
 
 # BatchStats.py
-# C
+# D
 # 14JUN25
-# Added quadrant analysis statistics
+# Added parallel, multi-thread, 8-core processing
 # Schema updated 07JUN25
 
 
@@ -258,6 +258,8 @@ import csv
 import pandas as pd # For statistical analysis
 import matplotlib.pyplot as plt
 import subprocess
+import concurrent.futures
+
 
 
 # =================================================================================================
@@ -301,17 +303,21 @@ def load_sgs_file(filename, status_widget):
         # update_status(status_widget, f"Successfully loaded: {os.path.basename(filename)}")
 
         if not isinstance(loaded_data, dict):
-            update_status(status_widget, f"Error: {os.path.basename(filename)} did not load as a dictionary.")
+            if status_widget:
+                update_status(status_widget, f"Error: {os.path.basename(filename)} did not load as a dictionary.")
             return None
         return loaded_data
     except FileNotFoundError:
-        update_status(status_widget, f"Error: File not found '{filename}'")
+        if status_widget:
+            update_status(status_widget, f"Error: File not found '{filename}'")
         return None
     except (pickle.UnpicklingError, EOFError) as e:
-        update_status(status_widget, f"Error unpickling data from {os.path.basename(filename)}: {e}")
+        if status_widget:
+            update_status(status_widget, f"Error unpickling data from {os.path.basename(filename)}: {e}")
         return None
     except Exception as e:
-        update_status(status_widget, f"Unexpected error loading {os.path.basename(filename)}: {e}")
+        if status_widget:
+            update_status(status_widget, f"Unexpected error loading {os.path.basename(filename)}: {e}")
         return None
 
 
@@ -563,6 +569,19 @@ class SquareUsageStatistic(BaseStatistic):
         self.square_counts = [[0] * 15 for _ in range(15)]
         self.games_processed = 0
 
+    def aggregate(self, other_stat):
+        """Combines the results from another instance of this class."""
+        if not isinstance(other_stat, SquareUsageStatistic):
+            return
+        self.games_processed += other_stat.games_processed
+        for r in range(15):
+            for c in range(15):
+                self.square_counts[r][c] += other_stat.square_counts[r][c]
+
+
+
+        
+
     def get_column_names(self):
         # This statistic does not add columns to the main CSV.
         return []
@@ -617,6 +636,16 @@ class ComebackAnalysisStatistic(BaseStatistic):
         self.open_new_quad_wins = 0
         self.play_existing_attempts = 0
         self.play_existing_wins = 0
+
+
+    def aggregate(self, other_stat):
+        """Combines the results from another instance of this class."""
+        if not isinstance(other_stat, ComebackAnalysisStatistic):
+            return
+        self.open_new_quad_attempts += other_stat.open_new_quad_attempts
+        self.open_new_quad_wins += other_stat.open_new_quad_wins
+        self.play_existing_attempts += other_stat.play_existing_attempts
+        self.play_existing_wins += other_stat.play_existing_wins
 
     def get_column_names(self):
         return [] # Does not add to the main CSV
@@ -724,87 +753,99 @@ STATISTICS_TO_RUN = [
 # /////////////////////////////////////////////////////////////////////////////////////////////////
 # =================================================================================================
 
+
+def process_single_file(filepath):
+    """
+    Worker function that processes a single .sgs file.
+    This function is executed by each parallel process.
+    """
+    # Note: We can't pass the status_widget to child processes.
+    # Status updates will be handled differently.
+    raw_game_data = load_sgs_file(filepath, None)
+    if not raw_game_data:
+        return None
+
+    sgs_file = os.path.basename(filepath)
+    parsed_game = ParsedGame(raw_game_data, sgs_file)
+    if not parsed_game.is_valid():
+        return None
+
+    # Instantiate local statistics for this one file
+    stats_to_run_for_csv = [
+        GameIDStatistic(), PlayerScoreStatistic(), BingoCountStatistic(),
+        MaxTurnScoreStatistic(), QuadrantUsageStatistic(), OpeningMoveStatistic(),
+    ]
+    square_usage_stat = SquareUsageStatistic()
+    comeback_stat = ComebackAnalysisStatistic()
+    
+    # Calculate all stats
+    game_stats_row = {}
+    for stat in stats_to_run_for_csv:
+        game_stats_row.update(stat.calculate(parsed_game))
+    
+    square_usage_stat.calculate(parsed_game)
+    comeback_stat.calculate(parsed_game)
+
+    return (game_stats_row, square_usage_stat, comeback_stat)
+
+
+
+
+
 def process_all_sgs_files(directory, status_widget):
     """
-    Orchestrates the entire process:
-    1. Finds all .sgs files.
-    2. For each file, creates a ParsedGame object.
-    3. Runs all registered statistic calculators on it.
-    4. Collects the results and writes them to a single CSV file.
-    5. Saves results from any stateful statistics.
+    Orchestrates the entire process in parallel using a ProcessPoolExecutor.
     """
-    update_status(status_widget, f"Starting processing of SGS files in: {directory}")
-    sgs_files = [f for f in os.listdir(directory) if f.endswith(".sgs")]
+    update_status(status_widget, f"Scanning for SGS files in: {directory}")
+    sgs_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith(".sgs")]
 
     if not sgs_files:
         update_status(status_widget, "No .sgs files found in the directory.")
         return None
 
-    # Instantiate all statistics, including any stateful ones
-    square_usage_stat = SquareUsageStatistic()
-    comeback_stat = ComebackAnalysisStatistic()
-    stats_to_run_for_csv = [
-        GameIDStatistic(),
-        PlayerScoreStatistic(),
-        BingoCountStatistic(),
-        MaxTurnScoreStatistic(),
-        QuadrantUsageStatistic(),
-        OpeningMoveStatistic(),
-    ]
-    all_stats_processors = stats_to_run_for_csv + [square_usage_stat]
-    all_stats_processors.append(comeback_stat)
+    all_csv_rows = []
+    # Create master instances of stateful stats to aggregate into
+    master_square_usage_stat = SquareUsageStatistic()
+    master_comeback_stat = ComebackAnalysisStatistic()
+    
+    processed_count = 0
+    update_status(status_widget, f"Processing {len(sgs_files)} files using multiple cores...")
 
-    all_games_data = []
-    for sgs_file in sgs_files:
-        filepath = os.path.join(directory, sgs_file)
-        update_status(status_widget, f"Processing: {sgs_file}...")
+    with concurrent.futures.ProcessPoolExecutor() as executor:
+        # map() distributes the work and returns results as they are completed
+        results = executor.map(process_single_file, sgs_files)
         
-        raw_game_data = load_sgs_file(filepath, status_widget)
-        if not raw_game_data:
-            update_status(status_widget, f"Failed to load or read {sgs_file}. Skipping.")
-            continue
+        for result in results:
+            processed_count += 1
+            if processed_count % 100 == 0: # Update GUI every 100 files
+                update_status(status_widget, f"  ... processed {processed_count}/{len(sgs_files)} files.")
 
-        parsed_game = ParsedGame(raw_game_data, sgs_file)
-        if not parsed_game.is_valid():
-            update_status(status_widget, f"Skipping {sgs_file} due to missing critical data.")
-            continue
+            if result:
+                csv_row, square_stat, comeback_stat = result
+                all_csv_rows.append(csv_row)
+                master_square_usage_stat.aggregate(square_stat)
+                master_comeback_stat.aggregate(comeback_stat)
 
-        # Calculate all stats for this game
-        game_stats_row = {}
-        for statistic_calculator in all_stats_processors:
-            try:
-                result = statistic_calculator.calculate(parsed_game)
-                if result:
-                    game_stats_row.update(result)
-            except Exception as e:
-                update_status(status_widget, f"Error calculating {type(statistic_calculator).__name__} for {sgs_file}: {e}")
+    update_status(status_widget, f"Finished processing. Aggregating final results...")
 
-        if game_stats_row:
-            all_games_data.append(game_stats_row)
+    # --- Save aggregated results ---
+    master_square_usage_stat.save_results()
+    master_comeback_stat.save_results()
 
-    # After processing all files, save results from stateful statistics
-    square_usage_stat.save_results()
-    comeback_stat.save_results()
-
-    if not all_games_data:
+    if not all_csv_rows:
         update_status(status_widget, "No data successfully extracted for CSV from any SGS files.")
         return False
 
-    # Write to CSV
+    # --- Write to CSV ---
     try:
-        fieldnames = []
-        for stat in stats_to_run_for_csv:
-            fieldnames.extend(stat.get_column_names())
-
+        # Get fieldnames from the first valid result
+        fieldnames = all_csv_rows[0].keys()
         with open(OUTPUT_CSV_FILE, 'w', newline='') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(all_games_data)
-        update_status(status_widget, f"Successfully wrote data for {len(all_games_data)} games to {OUTPUT_CSV_FILE}")
+            writer.writerows(all_csv_rows)
+        update_status(status_widget, f"Successfully wrote data for {len(all_csv_rows)} games to {OUTPUT_CSV_FILE}")
         return True
-    except IOError as e:
-        update_status(status_widget, f"Error writing to CSV {OUTPUT_CSV_FILE}: {e}")
-        return False
     except Exception as e:
         update_status(status_widget, f"Unexpected error writing CSV: {e}")
         return False
