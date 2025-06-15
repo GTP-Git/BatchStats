@@ -1,0 +1,10 @@
+-- Count how many bonus squares are available by turn
+
+-- show regression of how likely a comeback is for a player who is behind, with respect to bonus squares.
+
+-- predict eventual winner for any given game state
+
+-- how important are the number of remaining blanks, esses and power tiles in the unseen pool to the trailing player?
+
+-- score by power tile
+
