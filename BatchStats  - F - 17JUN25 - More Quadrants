@@ -1,9 +1,9 @@
 
 
 # BatchStats.py
-# E
-# 16JUN25
-# Scoring Stats
+# F
+# 17JUN25
+# More Quadrants
 # Schema updated 07JUN25
 
 
@@ -1141,6 +1141,55 @@ def setup_gui():
 
 
 
+
+
+class FootnoteManager:
+    """
+    A helper class to MANUALLY manage the creation and rendering of footnotes
+    using HTML anchors to ensure correct placement in the final PDF.
+    """
+    def __init__(self):
+        self._footnotes = []
+        self._counter = 1
+
+    def add_footnote(self, text):
+        """
+        Adds a footnote and returns an HTML superscript link to its anchor.
+
+        Args:
+            text (str): The content of the footnote.
+
+        Returns:
+            str: The HTML link, e.g., '<sup><a href="#fn1">[1]</a></sup>'.
+        """
+        anchor_name = f"fn{self._counter}"
+        link = f'<sup><a href="#{anchor_name}">[{self._counter}]</a></sup>'
+        
+        # Store the text and anchor for rendering later
+        self._footnotes.append({'text': text, 'anchor': anchor_name})
+        
+        self._counter += 1
+        return link
+
+    def render_footnotes(self):
+        """
+        Returns a fully formed Markdown/HTML string for the 'Notes' section.
+        """
+        if not self._footnotes:
+            return ""
+        
+        # Start the section
+        lines = ["\n\n---\n\n## Notes\n"]
+        
+        # Create a numbered list with anchors
+        for i, fn in enumerate(self._footnotes):
+            # The anchor is the link destination. The text is the content.
+            lines.append(f"{i+1}. <a name=\"{fn['anchor']}\"></a> {fn['text']}")
+            
+        return "\n".join(lines)
+
+
+
 def generate_analysis_report(status_widget):
     """
     LAYER 7: REPORT GENERATION ORCHESTRATOR
@@ -1161,6 +1210,7 @@ def generate_analysis_report(status_widget):
 
     # --- 2. Run Individual Analysis Sections ---
     template_data = {}
+    footnote_manager = FootnoteManager()
 
     score_summary_results = generate_score_summary_analysis(df, status_widget)
     if not score_summary_results: return
@@ -1169,6 +1219,10 @@ def generate_analysis_report(status_widget):
     quadrant_results = generate_quadrant_analysis(df, status_widget)
     if not quadrant_results: return
     template_data.update(quadrant_results)
+
+    quad_extremes_results = generate_quadrant_extremes_analysis(df, status_widget, footnote_manager)
+    if not quad_extremes_results: return
+    template_data.update(quad_extremes_results)
 
     dominant_quad_results = generate_dominant_quadrant_analysis(df, status_widget)
     if not dominant_quad_results: return
@@ -1191,6 +1245,10 @@ def generate_analysis_report(status_widget):
     template_data.update(heatmap_results)
 
     # --- 3. Load Template and Populate ---
+    # THIS IS THE FIX: We add the rendered footnotes to the data dictionary
+    # BEFORE formatting the template.
+    template_data['final_footnotes'] = footnote_manager.render_footnotes()
+    
     template_filename = "report_template.md"
     update_status(status_widget, f"Loading template file: {template_filename}...")
     try:
@@ -1322,30 +1380,36 @@ def generate_score_summary_analysis(df, status_widget):
         else:
             turn_advantage_contribution_pct = 0
 
-        # Build the narrative text piece by piece
-        narrative_text = (
+        # THIS IS THE FIX: Build the text as a list of paragraphs and join with newlines.
+        # This ensures Markdown, not LaTeX, handles paragraph breaks.
+        narrative_paragraphs = []
+        narrative_paragraphs.append(
             f"Player 1 wins **{p1_win_pct:.2f}%** of games, demonstrating a clear first-player advantage. "
-            f"The final average score advantage for Player 1 is **{score_advantage:.2f}** points.\n\n"
+            f"The final average score advantage for Player 1 is **{score_advantage:.2f}** points."
+        )
+        narrative_paragraphs.append(
             f"A key driver of this is the structural turn advantage: Player 1 gets an average of **{turn_advantage:.2f}** more turns per game. "
             f"Valued at Player 1's average of **{avg_p1_score_per_turn:.2f}** points per turn, this extra play opportunity should theoretically "
             f"provide an advantage of **{turn_advantage_value:.2f}** points. "
             f"This indicates that the turn advantage alone accounts for **{turn_advantage_contribution_pct:.2f}%** of the final score difference."
         )
-
-        # Append the new paragraphs
+        
         mov_difference = p1_avg_mov - p2_avg_mov
-        narrative_text += (
-            f"\n\nPlayer 1's average margin of victory is **{p1_avg_mov:.2f}** points. "
+        narrative_paragraphs.append(
+            f"Player 1's average margin of victory is **{p1_avg_mov:.2f}** points. "
             f"Player 2's average margin of victory is **{p2_avg_mov:.2f}** points. "
             f"The difference is **{mov_difference:.2f}** points."
         )
         
-        narrative_text += (
-            "\n\nThe key takeaway is that the game is not just tilted in P1's favor in terms of frequency of wins, "
+        narrative_paragraphs.append(
+            "The key takeaway is that the game is not just tilted in P1's favor in terms of frequency of wins, "
             "but also in the quality of those wins. A win by the first player is, on average, a more dominant "
             "performance than a win by the second player. Player 2 has to work harder and play more efficiently "
             "just to eke out a victory, which is reflected in their smaller average winning margin."
         )
+        
+        # Join paragraphs with two newlines for proper Markdown paragraph separation.
+        narrative_text = "\n\n".join(narrative_paragraphs)
 
         update_status(status_widget, "Score summary and analysis complete.")
         return {
@@ -1731,6 +1795,82 @@ def generate_comeback_analysis(status_widget):
         return None
     except Exception as e:
         update_status(status_widget, f"ERROR during comeback analysis: {e}")
+        return None
+
+
+
+def generate_quadrant_extremes_analysis(df, status_widget, footnote_manager):
+    """
+    Generates a table, a box plot, and a single comprehensive footnote for
+    the min/max quadrant usage and their source games.
+
+    Args:
+        df (pd.DataFrame): The main dataframe with all game stats.
+        status_widget: The tkinter widget for status updates.
+        footnote_manager (FootnoteManager): The manager for creating footnotes.
+
+    Returns:
+        A dictionary containing markdown elements for the template, or None if an error occurs.
+    """
+    import seaborn as sns
+
+    update_status(status_widget, "Generating quadrant extremes analysis with single footnote...")
+    try:
+        chart_filename = "quadrant_distribution_chart.png"
+        quad_info = {
+            'q1_perc': 'Q1 (Top-Right)', 'q2_perc': 'Q2 (Top-Left)',
+            'q3_perc': 'Q3 (Bottom-Left)', 'q4_perc': 'Q4 (Bottom-Right)'
+        }
+        quad_perc_cols = list(quad_info.keys())
+
+        # --- Generate the simple table using to_markdown ---
+        mins = df[quad_perc_cols].min()
+        maxs = df[quad_perc_cols].max()
+        table_df = pd.DataFrame({
+            'Quadrant': list(quad_info.values()),
+            'Min Usage (%)': mins.values,
+            'Max Usage (%)': maxs.values
+        })
+        table_md = table_df.to_markdown(index=False, floatfmt=".2f")
+
+        # --- Find all source games and build a single footnote string ---
+        footnote_lines = []
+        for col, name in quad_info.items():
+            min_idx = df[col].idxmin()
+            min_game = df.loc[min_idx, 'game_id']
+            # THIS IS THE FIX: Start each line with a pipe for a Markdown line block
+            footnote_lines.append(f"| Min usage for {name.split(' ')[0]}: **{min_game}**")
+
+            max_idx = df[col].idxmax()
+            max_game = df.loc[max_idx, 'game_id']
+            footnote_lines.append(f"| Max usage for {name.split(' ')[0]}: **{max_game}**")
+        
+        # Start with a newline, then join with newlines.
+        full_footnote_text = "\n" + "\n".join(footnote_lines)
+        footnote_ref = footnote_manager.add_footnote(full_footnote_text)
+
+        # --- Generate Box Plot Chart (no changes here) ---
+        df_long = df[quad_perc_cols].melt(var_name='Quadrant', value_name='Usage Percentage')
+        quadrant_map = {k: v.split(' ')[0] for k, v in quad_info.items()}
+        df_long['Quadrant'] = df_long['Quadrant'].map(quadrant_map)
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        sns.boxplot(x='Quadrant', y='Usage Percentage', data=df_long, ax=ax)
+        ax.set_title('Distribution of Quadrant Usage Across All Games')
+        ax.set_ylabel('Percentage of Tiles Played in Quadrant (%)')
+        ax.set_xlabel('Quadrant')
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.savefig(chart_filename)
+        plt.close(fig)
+
+        update_status(status_widget, "Quadrant extremes analysis complete.")
+        return {
+            'quadrant_extremes_table': table_md,
+            'quadrant_distribution_chart_path': chart_filename,
+            'quadrant_extremes_footnote_ref': footnote_ref
+        }
+    except Exception as e:
+        update_status(status_widget, f"ERROR during quadrant extremes analysis: {e}")
         return None
     
 
