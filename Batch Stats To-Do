@@ -1,0 +1,68 @@
+######### --- Physical Board Dynamics --- #########
+
+-- Show bonus square counts by turn
+
+-- Any games with all bonus squares used?
+
+-- How does number of bonus squares used by a player relate to score?
+
+-- Which TWS square has the highers/lowest avg score associated with it?
+
+
+######### --- Scoring --- #########
+
+-- How does avg # of tiles player per turn relate to scoring?
+
+--"Home Run" Play Impact: Does the game_max_turn_score correlate strongly with the winner's score?
+This would test the theory that one massive, game-changing play is more important than steady, consistent scoring.
+
+-- Luck Factor: The schema for each move contains 'luck_factor': (float).
+This is a pre-calculated value that measures how the value of tiles drawn compares to the expected value
+of tiles drawn from the bag at that time. A positive luck factor means the player drew better-than-average tiles.
+This is the single most valuable piece of data we can add next.
+We should create a LuckFactorStatistic class that calculates the average luck factor for P1 and P2
+over the whole game and adds it to the CSV.
+
+-- Highest/lowest game score for each player
+
+-- Highest/lowest total game score, both players combined
+
+
+-- Higest single score play
+
+-- How much of a player's score is attributable to bingos? Thus, how much is non-bingo scoring?
+
+-- Power tile scoring? Esses? Blanks? Correlation with win%.
+
+
+
+
+
+
+
+
+
+
+######### --- Bingos --- #########
+
+-- Blank Drawing: A simpler measure of luck. We can count how many blank tiles each player drew during the game.
+The player who draws the blanks has a massive advantage.
+
+
+
+
+######### --- Blanks --- #########
+
+
+
+######### --- Exchanging --- #########
+
+
+
+######### --- COMPLETED --- #########
+
+
+
+
+
+
