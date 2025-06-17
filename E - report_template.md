@@ -2,6 +2,40 @@
 
 This report summarizes statistics gathered from the batch processing of .sgs game files.
 
+
+
+
+---
+
+# Scoring Statistics
+
+---
+
+## Overall Score Summary
+
+{score_summary_table}
+
+<br>
+
+{margin_of_victory_table}
+
+### Analysis
+
+{score_summary_narrative}
+
+---
+
+
+# Let's Get Physical: Scrabble Board Dynamics
+
+
+Scrabble is played on a physical board,
+but does the physical makeup of the board confer any tactical advantage to either player? Let's take a look.
+
+
+\FloatBarrier
+
+
 ## Quadrant Usage Analysis
 
 The following table and chart show the distribution of play across the four board quadrants.
