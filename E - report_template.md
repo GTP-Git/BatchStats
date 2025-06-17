@@ -58,6 +58,22 @@ counted in both adjacent quadrants.
 
 ---
 
+### Min/Max and Distribution of Quadrant Usage{quadrant_extremes_footnote_ref}
+
+The following table shows the absolute minimum and maximum percentage of tiles played in each quadrant across all games, highlighting the full range of possibilities. The source games for each of these extreme values are listed in the Notes section at the end of this report.
+
+{quadrant_extremes_table}
+
+\FloatBarrier
+
+The box plot below provides a more detailed statistical view. The box represents the central 50% of games (the interquartile range), the line inside the box is the median usage, and the whiskers extend to show the full range from minimum to maximum. This visualization helps in understanding not just the extremes, but also the consistency of usage for each quadrant.
+
+![Quadrant Distribution Chart]({quadrant_distribution_chart_path})
+
+\FloatBarrier
+
+---
+
 ## Score by Dominant Quadrant
 
 This section investigates whether focusing play in a specific quadrant correlates with higher scores.
@@ -132,4 +148,4 @@ A higher percentage indicates more frequent usage.
 
 ![Square Usage Heatmap]({heatmap_path})
 
-\FloatBarrier
+{final_footnotes}
