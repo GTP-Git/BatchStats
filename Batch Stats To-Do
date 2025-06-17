@@ -34,6 +34,12 @@ over the whole game and adds it to the CSV.
 
 -- Power tile scoring? Esses? Blanks? Correlation with win%.
 
+-- Greatest margin of victory
+
+-- Greatest comeback
+
+
+
 
 
 
@@ -45,13 +51,19 @@ over the whole game and adds it to the CSV.
 
 ######### --- Bingos --- #########
 
--- Blank Drawing: A simpler measure of luck. We can count how many blank tiles each player drew during the game.
-The player who draws the blanks has a massive advantage.
+
+-- Highest number of bingos in one game, single player and both players combined
+
+-- Highest number of consecutive bingos, single player and both players combined
+
 
 
 
 
 ######### --- Blanks --- #########
+
+-- Blank Drawing: A simpler measure of luck. We can count how many blank tiles each player drew during the game.
+The player who draws the blanks has a massive advantage.
 
 
 
