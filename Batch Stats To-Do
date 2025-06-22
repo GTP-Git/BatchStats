@@ -1,6 +1,8 @@
 ######### --- Physical Board Dynamics --- #########
 
--- Show bonus square counts by turn
+-- Show bonus square counts by turn. Thus, by turn [turn] 50% of bonus squares are exhausted.
+
+-- Games with least/most used bonus squares
 
 -- Any games with all bonus squares used?
 
@@ -8,13 +10,20 @@
 
 -- Which TWS square has the highers/lowest avg score associated with it?
 
+-- Board volatility? What board conditions lead to a big score?
+
+-- Machine learning to determine board volatility? Winning chances?
+
+-- Any examples of seven overlaps? 6? Highest scoring overlaps? Most overlaps in a single game?
+
 
 ######### --- Scoring --- #########
 
--- How does avg # of tiles player per turn relate to scoring?
 
 --"Home Run" Play Impact: Does the game_max_turn_score correlate strongly with the winner's score?
 This would test the theory that one massive, game-changing play is more important than steady, consistent scoring.
+
+-- Measures of single-game scoring volatility? 
 
 -- Luck Factor: The schema for each move contains 'luck_factor': (float).
 This is a pre-calculated value that measures how the value of tiles drawn compares to the expected value
@@ -37,6 +46,14 @@ over the whole game and adds it to the CSV.
 -- Greatest margin of victory
 
 -- Greatest comeback
+
+-- Game with the highest % of least/most probable words
+
+-- How often is the player with the higest play in a game the winner?
+
+
+
+
 
 
 
@@ -62,8 +79,7 @@ over the whole game and adds it to the CSV.
 
 ######### --- Blanks --- #########
 
--- Blank Drawing: A simpler measure of luck. We can count how many blank tiles each player drew during the game.
-The player who draws the blanks has a massive advantage.
+-- Blank Drawing: how many blank tiles each player drew during the game.
 
 
 
@@ -71,7 +87,29 @@ The player who draws the blanks has a massive advantage.
 
 
 
+
+######### --- Luck --- #########
+
+-- Measures of luck, lowest/highest per turn/game
+
+-- Record for most consonants/vowels drawn
+
+-- avg score if a player draws both blanks, all four esses and all four power tiles (number of times this has happened,
+and what percentage of the time it happens.
+
+
+
+
+
+
 ######### --- COMPLETED --- #########
+                                                                                     
+
+-- How does avg # of tiles per player per turn relate to scoring?
+
+-- Is playing <=3 unique letters on the opening move is more/less better than playing >3 unique letters. The theory is that less unique letters allows for less 8-letter bingo opportunities for your opponent.
+
+
 
 
 
