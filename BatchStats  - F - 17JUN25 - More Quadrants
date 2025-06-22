@@ -1,9 +1,10 @@
 
 
 # BatchStats.py
-# F
-# 17JUN25
-# More Quadrants
+# G
+# 22JUN25
+#Added Halves board stats
+#Added scoring response to opening move
 # Schema updated 07JUN25
 
 
@@ -400,6 +401,13 @@ class GameIDStatistic(BaseStatistic):
     def calculate(self, parsed_game):
         return {"game_id": parsed_game.get_filename()}
 
+
+
+#************ --- Scoring Statistics --- ************#
+
+
+
+
 class PlayerScoreStatistic(BaseStatistic):
     """Calculates final scores for both players."""
     def get_column_names(self):
@@ -439,6 +447,8 @@ class BingoCountStatistic(BaseStatistic):
                     p2_bingos += 1
         
         return {"p1_bingos": p1_bingos, "p2_bingos": p2_bingos}
+
+
 
 class MaxTurnScoreStatistic(BaseStatistic):
     """Finds the single highest-scoring turn in the game."""
@@ -482,7 +492,108 @@ class TurnCountStatistic(BaseStatistic):
 
 
 
-#************ --- Scoring Statistics --- ************#
+
+# In "BatchStats  - F - 17JUN25 - More Quadrants":
+class OpeningMoveResponseStatistic(BaseStatistic):
+    """
+    Analyzes the relationship between P1's opening move and P2's response.
+    Specifically, it records the number of *unique* tiles in P1's opener
+    and the score of P2's subsequent first move.
+    """
+    def get_column_names(self):
+        return ["p1_opening_length", "p1_opening_unique_tiles", "p2_response_score"]
+
+    def calculate(self, parsed_game):
+        move_history = parsed_game.get_move_history()
+        
+        p1_first_move = None
+        p2_first_move = None
+        
+        # Find the first 'place' move for each player
+        found_p1_move = False
+        for move in move_history:
+            if move.get('move_type') == 'place':
+                player_idx = move.get('player')
+                if player_idx == 1 and not found_p1_move:
+                    p1_first_move = move
+                    found_p1_move = True
+                elif player_idx == 2 and found_p1_move: # Ensure P2's move is after P1's
+                    p2_first_move = move
+                    break # We have both moves we need
+
+        # If we don't have a valid P1 opener and P2 response, return None
+        if not p1_first_move or not p2_first_move:
+            return {
+                "p1_opening_length": None,
+                "p1_opening_unique_tiles": None, 
+                "p2_response_score": None
+            }
+
+        # Calculate characteristics of P1's move
+        p1_tiles_played = p1_first_move.get(MOVE_TILES_PLAYED_KEY, [])
+        p1_length = len(p1_tiles_played)
+        p1_unique_tiles = len(set(p1_tiles_played))
+        
+        # Get score for P2's move
+        p2_score = p2_first_move.get(MOVE_SCORE_KEY, 0)
+
+        return {
+            "p1_opening_length": p1_length,
+            "p1_opening_unique_tiles": p1_unique_tiles,
+            "p2_response_score": p2_score
+        }
+
+
+
+
+class OpeningMoveAEINRSTResponseStatistic(BaseStatistic):
+    """
+    Analyzes P2's response score based on the number of unique "AEINRST"
+    letters in P1's opening move.
+    """
+    def get_column_names(self):
+        return ["p1_opening_aeinrst_count", "p2_aeinrst_response_score"]
+
+    def calculate(self, parsed_game):
+        move_history = parsed_game.get_move_history()
+        
+        p1_first_move = None
+        p2_first_move = None
+        
+        # Find the first 'place' move for each player
+        found_p1_move = False
+        for move in move_history:
+            if move.get('move_type') == 'place':
+                player_idx = move.get('player')
+                if player_idx == 1 and not found_p1_move:
+                    p1_first_move = move
+                    found_p1_move = True
+                elif player_idx == 2 and found_p1_move:
+                    p2_first_move = move
+                    break
+
+        if not p1_first_move or not p2_first_move:
+            return {"p1_opening_aeinrst_count": None, "p2_aeinrst_response_score": None}
+
+        # Define the target letters
+        AEINRST_SET = {'A', 'E', 'I', 'N', 'R', 'S', 'T'}
+
+        # Calculate unique AEINRST tiles for P1's move
+        p1_tiles_played = p1_first_move.get(MOVE_TILES_PLAYED_KEY, [])
+        p1_tiles_set = set(p1_tiles_played)
+        p1_aeinrst_count = len(p1_tiles_set.intersection(AEINRST_SET))
+        
+        # Get score for P2's move
+        p2_score = p2_first_move.get(MOVE_SCORE_KEY, 0)
+
+        return {
+            "p1_opening_aeinrst_count": p1_aeinrst_count,
+            "p2_aeinrst_response_score": p2_score
+        }
+
+
+
+
 
 
     
@@ -549,6 +660,61 @@ class QuadrantUsageStatistic(BaseStatistic):
             'q2_perc': q2_perc,
             'q3_perc': q3_perc,
             'q4_perc': q4_perc,
+        }
+
+
+
+
+class BoardHalvesStatistic(BaseStatistic):
+    """
+    Calculates the number and percentage of tiles played in each half of the board.
+    Uses an inclusive counting method where tiles on the center row/column are
+    counted in both adjacent halves.
+    """
+    def get_column_names(self):
+        return [
+            'top_half_count', 'bottom_half_count', 'left_half_count', 'right_half_count',
+            'top_half_perc', 'bottom_half_perc', 'left_half_perc', 'right_half_perc'
+        ]
+
+    def calculate(self, parsed_game):
+        counts = {"top": 0, "bottom": 0, "left": 0, "right": 0}
+        center_r, center_c = 7, 7
+        total_tiles_placed = 0
+
+        for move in parsed_game.get_move_history():
+            if move.get('move_type') != 'place':
+                continue
+            
+            placed_tiles = move.get('newly_placed', [])
+            if not isinstance(placed_tiles, list):
+                continue
+
+            total_tiles_placed += len(placed_tiles)
+
+            for r, c, _ in placed_tiles:
+                if r <= center_r: counts["top"] += 1
+                if r >= center_r: counts["bottom"] += 1
+                if c <= center_c: counts["left"] += 1
+                if c >= center_c: counts["right"] += 1
+        
+        if total_tiles_placed > 0:
+            top_perc = (counts["top"] / total_tiles_placed) * 100.0
+            bottom_perc = (counts["bottom"] / total_tiles_placed) * 100.0
+            left_perc = (counts["left"] / total_tiles_placed) * 100.0
+            right_perc = (counts["right"] / total_tiles_placed) * 100.0
+        else:
+            top_perc = bottom_perc = left_perc = right_perc = 0.0
+
+        return {
+            'top_half_count': counts["top"],
+            'bottom_half_count': counts["bottom"],
+            'left_half_count': counts["left"],
+            'right_half_count': counts["right"],
+            'top_half_perc': top_perc,
+            'bottom_half_perc': bottom_perc,
+            'left_half_perc': left_perc,
+            'right_half_perc': right_perc,
         }
 
 
@@ -757,6 +923,64 @@ class ComebackAnalysisStatistic(BaseStatistic):
         print(f"Comeback analysis data saved to {output_filename}")
 
 
+
+
+
+class ScoreByTilesPlayedStatistic(BaseStatistic):
+    """
+    A stateful statistic that aggregates scores based on the number of tiles
+    played in a turn (1-7). It saves its results to a separate JSON file.
+    """
+    def __init__(self):
+        # Key: number of tiles (1-7), Value: list of scores
+        self.scores_by_tile_count = {i: [] for i in range(1, 8)}
+
+    def aggregate(self, other_stat):
+        """Combines the results from another instance of this class."""
+        if not isinstance(other_stat, ScoreByTilesPlayedStatistic):
+            return
+        for i in range(1, 8):
+            self.scores_by_tile_count[i].extend(other_stat.scores_by_tile_count[i])
+
+    def get_column_names(self):
+        return [] # Does not add to the main CSV
+
+    def calculate(self, parsed_game):
+        for move in parsed_game.get_move_history():
+            if move.get('move_type') != 'place':
+                continue
+            
+            tiles_played = move.get(MOVE_TILES_PLAYED_KEY, [])
+            num_tiles = len(tiles_played)
+            
+            if 1 <= num_tiles <= 7:
+                score = move.get(MOVE_SCORE_KEY, 0)
+                if isinstance(score, (int, float)):
+                    self.scores_by_tile_count[num_tiles].append(score)
+        
+        return {} # Return empty dict as we don't add to CSV row
+
+    def save_results(self, output_filename="score_by_tiles_played.json"):
+        """Calculates final stats and saves the aggregated data to a JSON file."""
+        import json
+        
+        analysis_results = []
+        for tile_count in range(1, 8):
+            scores = self.scores_by_tile_count[tile_count]
+            turn_count = len(scores)
+            avg_score = sum(scores) / turn_count if turn_count > 0 else 0
+            
+            analysis_results.append({
+                'tiles_played': tile_count,
+                'turn_count': turn_count,
+                'avg_score': avg_score
+            })
+            
+        with open(output_filename, 'w') as f:
+            json.dump(analysis_results, f, indent=2)
+        print(f"Score by tiles played data saved to {output_filename}")
+
+
     
 
 
@@ -770,8 +994,11 @@ STATISTICS_TO_RUN = [
     BingoCountStatistic(),
     MaxTurnScoreStatistic(),
     QuadrantUsageStatistic(),
+    BoardHalvesStatistic(),
     OpeningMoveStatistic(),
     TurnCountStatistic(),
+    OpeningMoveResponseStatistic(),
+    OpeningMoveAEINRSTResponseStatistic(),
 ]
 
 
@@ -801,11 +1028,13 @@ def process_single_file(filepath):
     # Instantiate local statistics for this one file
     stats_to_run_for_csv = [
         GameIDStatistic(), PlayerScoreStatistic(), BingoCountStatistic(),
-        MaxTurnScoreStatistic(), QuadrantUsageStatistic(), OpeningMoveStatistic(),
-        TurnCountStatistic(),
+        MaxTurnScoreStatistic(), QuadrantUsageStatistic(), BoardHalvesStatistic(),
+        OpeningMoveStatistic(), TurnCountStatistic(), OpeningMoveResponseStatistic(),
+        OpeningMoveAEINRSTResponseStatistic(),
     ]
     square_usage_stat = SquareUsageStatistic()
     comeback_stat = ComebackAnalysisStatistic()
+    score_by_tiles_stat = ScoreByTilesPlayedStatistic()
     
     # Calculate all stats
     game_stats_row = {}
@@ -814,13 +1043,15 @@ def process_single_file(filepath):
     
     square_usage_stat.calculate(parsed_game)
     comeback_stat.calculate(parsed_game)
+    score_by_tiles_stat.calculate(parsed_game)
 
-    return (game_stats_row, square_usage_stat, comeback_stat)
-
-
-
+    return (game_stats_row, square_usage_stat, comeback_stat, score_by_tiles_stat)
 
 
+
+
+
+# In "BatchStats  - F - 17JUN25 - More Quadrants":
 def process_all_sgs_files(directory, status_widget):
     """
     Orchestrates the entire process in parallel using a ProcessPoolExecutor.
@@ -836,6 +1067,7 @@ def process_all_sgs_files(directory, status_widget):
     # Create master instances of stateful stats to aggregate into
     master_square_usage_stat = SquareUsageStatistic()
     master_comeback_stat = ComebackAnalysisStatistic()
+    master_score_by_tiles_stat = ScoreByTilesPlayedStatistic()
     
     processed_count = 0
     update_status(status_widget, f"Processing {len(sgs_files)} files using multiple cores...")
@@ -850,16 +1082,18 @@ def process_all_sgs_files(directory, status_widget):
                 update_status(status_widget, f"  ... processed {processed_count}/{len(sgs_files)} files.")
 
             if result:
-                csv_row, square_stat, comeback_stat = result
+                csv_row, square_stat, comeback_stat, score_by_tiles_stat = result
                 all_csv_rows.append(csv_row)
                 master_square_usage_stat.aggregate(square_stat)
                 master_comeback_stat.aggregate(comeback_stat)
+                master_score_by_tiles_stat.aggregate(score_by_tiles_stat)
 
     update_status(status_widget, f"Finished processing. Aggregating final results...")
 
     # --- Save aggregated results ---
     master_square_usage_stat.save_results()
     master_comeback_stat.save_results()
+    master_score_by_tiles_stat.save_results()
 
     if not all_csv_rows:
         update_status(status_widget, "No data successfully extracted for CSV from any SGS files.")
@@ -1216,6 +1450,22 @@ def generate_analysis_report(status_widget):
     if not score_summary_results: return
     template_data.update(score_summary_results)
 
+    score_by_tiles_results = generate_score_by_tiles_played_analysis(status_widget)
+    if not score_by_tiles_results: return
+    template_data.update(score_by_tiles_results)
+
+    opening_response_results = generate_opening_response_analysis(df, status_widget)
+    if not opening_response_results: return
+    template_data.update(opening_response_results)
+
+    opening_aeinrst_response_results = generate_opening_aeinrst_response_analysis(df, status_widget)
+    if not opening_aeinrst_response_results: return
+    template_data.update(opening_aeinrst_response_results)
+
+    opening_optimization_results = generate_opening_move_optimization_analysis(df, status_widget)
+    if not opening_optimization_results: return
+    template_data.update(opening_optimization_results)
+
     quadrant_results = generate_quadrant_analysis(df, status_widget)
     if not quadrant_results: return
     template_data.update(quadrant_results)
@@ -1223,6 +1473,10 @@ def generate_analysis_report(status_widget):
     quad_extremes_results = generate_quadrant_extremes_analysis(df, status_widget, footnote_manager)
     if not quad_extremes_results: return
     template_data.update(quad_extremes_results)
+
+    board_halves_results = generate_board_halves_extremes_analysis(df, status_widget, footnote_manager)
+    if not board_halves_results: return
+    template_data.update(board_halves_results)
 
     dominant_quad_results = generate_dominant_quadrant_analysis(df, status_widget)
     if not dominant_quad_results: return
@@ -1424,6 +1678,300 @@ def generate_score_summary_analysis(df, status_widget):
 
 
 
+def generate_score_by_tiles_played_analysis(status_widget):
+    """
+    Generates an analysis of scores based on the number of tiles played per turn.
+    
+    Args:
+        status_widget: The tkinter widget for status updates.
+
+    Returns:
+        A dictionary containing the markdown table and chart path for the template,
+        or None if an error occurs.
+    """
+    import json
+    
+    update_status(status_widget, "Generating score by tiles played analysis...")
+    try:
+        json_filename = "score_by_tiles_played.json"
+        chart_filename = "score_by_tiles_played_chart.png"
+
+        with open(json_filename, 'r') as f:
+            data = json.load(f)
+        
+        df = pd.DataFrame(data)
+        
+        # --- Generate Table ---
+        table_df = df.copy()
+        table_df.rename(columns={
+            'tiles_played': 'Number of Tiles Played',
+            'turn_count': 'Total Turns',
+            'avg_score': 'Average Score'
+        }, inplace=True)
+        # Format turn_count with commas for readability
+        table_df['Total Turns'] = table_df['Total Turns'].apply(lambda x: f"{x:,}")
+        table_md = table_df.to_markdown(index=False, floatfmt=".2f")
+        
+        # --- Generate Bar Chart ---
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.bar(df['tiles_played'], df['avg_score'], color='skyblue')
+        
+        ax.set_xlabel('Number of Tiles Played in Turn')
+        ax.set_ylabel('Average Score')
+        ax.set_title('Average Score by Number of Tiles Played')
+        ax.set_xticks(df['tiles_played']) # Ensure ticks are 1, 2, 3...7
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        plt.savefig(chart_filename)
+        plt.close(fig)
+        
+        update_status(status_widget, "Score by tiles played analysis complete.")
+        return {
+            'score_by_tiles_played_table': table_md,
+            'score_by_tiles_played_chart_path': chart_filename
+        }
+
+    except FileNotFoundError:
+        update_status(status_widget, f"ERROR: Data file '{json_filename}' not found.")
+        update_status(status_widget, "Please re-run 'Gather Stats' to generate it.")
+        return None
+    except Exception as e:
+        update_status(status_widget, f"ERROR during score by tiles played analysis: {e}")
+        return None
+
+
+
+
+
+def generate_opening_response_analysis(df, status_widget):
+    """
+    Analyzes P2's response score based on the number of unique tiles
+    in P1's opening move.
+
+    Args:
+        df (pd.DataFrame): The main dataframe with all game stats.
+        status_widget: The tkinter widget for status updates.
+
+    Returns:
+        A dictionary containing markdown elements for the template, or None if an error occurs.
+    """
+    update_status(status_widget, "Generating opening move response analysis...")
+    try:
+        chart_filename = "opening_response_chart.png"
+        required_cols = ['p1_opening_unique_tiles', 'p2_response_score']
+        if not all(col in df.columns for col in required_cols):
+            update_status(status_widget, f"ERROR: CSV is missing one of {required_cols}.")
+            update_status(status_widget, "Please re-run 'Gather Stats'.")
+            return None
+
+        # Filter out games where P1 or P2 passed/exchanged their first move
+        analysis_df = df.dropna(subset=required_cols)
+        analysis_df['p1_opening_unique_tiles'] = analysis_df['p1_opening_unique_tiles'].astype(int)
+
+        if analysis_df.empty:
+            update_status(status_widget, "No valid games found for opening response analysis.")
+            return {
+                'opening_response_table': "No valid games found for this analysis.",
+                'opening_response_chart_path': ""
+            }
+
+        # Group by the number of unique tiles and calculate stats
+        grouped = analysis_df.groupby('p1_opening_unique_tiles')['p2_response_score'].agg(['mean', 'count']).reset_index()
+        grouped.rename(columns={
+            'p1_opening_unique_tiles': "P1's Unique Opening Tiles",
+            'mean': 'Avg. P2 Response Score',
+            'count': 'Game Count'
+        }, inplace=True)
+
+        # --- Generate Table ---
+        table_md = grouped.to_markdown(index=False, floatfmt=".2f")
+
+        # --- Generate Bar Chart ---
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.bar(grouped["P1's Unique Opening Tiles"], grouped['Avg. P2 Response Score'], color='coral')
+        
+        ax.set_xlabel("Number of Unique Tiles in P1's Opening Move")
+        ax.set_ylabel("Average Score of P2's First Move")
+        ax.set_title("P2's Response Score vs. Complexity of P1's Opener")
+        ax.set_xticks(grouped["P1's Unique Opening Tiles"])
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        plt.savefig(chart_filename)
+        plt.close(fig)
+
+        update_status(status_widget, "Opening move response analysis complete.")
+        return {
+            'opening_response_table': table_md,
+            'opening_response_chart_path': chart_filename
+        }
+
+    except Exception as e:
+        update_status(status_widget, f"ERROR during opening move response analysis: {e}")
+        return None
+
+
+
+
+def generate_opening_aeinrst_response_analysis(df, status_widget):
+    """
+    Analyzes P2's response score based on the number of unique AEINRST
+    letters in P1's opening move.
+
+    Args:
+        df (pd.DataFrame): The main dataframe with all game stats.
+        status_widget: The tkinter widget for status updates.
+
+    Returns:
+        A dictionary containing markdown elements for the template, or None if an error occurs.
+    """
+    update_status(status_widget, "Generating opening move AEINRST response analysis...")
+    try:
+        chart_filename = "opening_aeinrst_response_chart.png"
+        required_cols = ['p1_opening_aeinrst_count', 'p2_aeinrst_response_score']
+        if not all(col in df.columns for col in required_cols):
+            update_status(status_widget, f"ERROR: CSV is missing one of {required_cols}.")
+            update_status(status_widget, "Please re-run 'Gather Stats'.")
+            return None
+
+        # Filter out games where P1 or P2 passed/exchanged their first move
+        analysis_df = df.dropna(subset=required_cols)
+        analysis_df['p1_opening_aeinrst_count'] = analysis_df['p1_opening_aeinrst_count'].astype(int)
+
+        if analysis_df.empty:
+            update_status(status_widget, "No valid games found for AEINRST response analysis.")
+            return {
+                'opening_aeinrst_response_table': "No valid games found for this analysis.",
+                'opening_aeinrst_response_chart_path': ""
+            }
+
+        # Group by the number of unique tiles and calculate stats
+        grouped = analysis_df.groupby('p1_opening_aeinrst_count')['p2_aeinrst_response_score'].agg(['mean', 'count']).reset_index()
+        grouped.rename(columns={
+            'p1_opening_aeinrst_count': "P1's Unique AEINRST Tiles",
+            'mean': 'Avg. P2 Response Score',
+            'count': 'Game Count'
+        }, inplace=True)
+
+        # --- Generate Table ---
+        table_md = grouped.to_markdown(index=False, floatfmt=".2f")
+
+        # --- Generate Bar Chart ---
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.bar(grouped["P1's Unique AEINRST Tiles"], grouped['Avg. P2 Response Score'], color='mediumseagreen')
+        
+        ax.set_xlabel("Number of Unique AEINRST Tiles in P1's Opening Move")
+        ax.set_ylabel("Average Score of P2's First Move")
+        ax.set_title("P2's Response Score vs. AEINRST Tiles in P1's Opener")
+        ax.set_xticks(range(0, 8)) # Ensure ticks are 0, 1, 2...7
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        plt.savefig(chart_filename)
+        plt.close(fig)
+
+        update_status(status_widget, "Opening move AEINRST response analysis complete.")
+        return {
+            'opening_aeinrst_response_table': table_md,
+            'opening_aeinrst_response_chart_path': chart_filename
+        }
+
+    except Exception as e:
+        update_status(status_widget, f"ERROR during opening move AEINRST response analysis: {e}")
+        return None
+
+
+
+
+def generate_opening_move_optimization_analysis(df, status_widget):
+    """
+    Identifies the optimal opening move characteristics to minimize P2's response score.
+
+    Args:
+        df (pd.DataFrame): The main dataframe with all game stats.
+        status_widget: The tkinter widget for status updates.
+
+    Returns:
+        A dictionary containing markdown elements for the template, or None if an error occurs.
+    """
+    update_status(status_widget, "Generating opening move optimization analysis...")
+    try:
+        MIN_GAMES_THRESHOLD = 10 # Minimum occurrences to be considered statistically significant
+        
+        required_cols = [
+            'p1_opening_length', 'p1_opening_unique_tiles', 
+            'p1_opening_aeinrst_count', 'p2_response_score'
+        ]
+        if not all(col in df.columns for col in required_cols):
+            update_status(status_widget, f"ERROR: CSV is missing one of {required_cols}.")
+            update_status(status_widget, "Please re-run 'Gather Stats'.")
+            return None
+
+        # Filter for valid games and ensure correct types
+        analysis_df = df.dropna(subset=required_cols).copy()
+        for col in required_cols:
+            if col != 'p2_response_score':
+                 analysis_df[col] = analysis_df[col].astype(int)
+
+        if analysis_df.empty:
+            update_status(status_widget, "No valid games found for opening move optimization.")
+            return {'best_openers_table': "No data.", 'worst_openers_table': "No data.", 'opening_optimization_narrative': "Not enough data."}
+
+        # Group by all three P1 move characteristics
+        grouped = analysis_df.groupby([
+            'p1_opening_length', 
+            'p1_opening_unique_tiles', 
+            'p1_opening_aeinrst_count'
+        ])['p2_response_score'].agg(['mean', 'count']).reset_index()
+
+        # Filter for significance
+        significant_openers = grouped[grouped['count'] >= MIN_GAMES_THRESHOLD].copy()
+
+        if significant_openers.empty:
+            update_status(status_widget, f"No opening types met the {MIN_GAMES_THRESHOLD} game threshold.")
+            return {'best_openers_table': "No data.", 'worst_openers_table': "No data.", 'opening_optimization_narrative': "Not enough data."}
+
+        # --- Find Best and Worst Openers ---
+        significant_openers.sort_values('mean', ascending=True, inplace=True)
+        
+        best_openers = significant_openers.head(10)
+        worst_openers = significant_openers.tail(10).sort_values('mean', ascending=False)
+
+        # --- Format Tables for Report ---
+        col_rename_map = {
+            'p1_opening_length': 'Length',
+            'p1_opening_unique_tiles': 'Unique Tiles',
+            'p1_opening_aeinrst_count': 'AEINRST Count',
+            'mean': 'Avg. P2 Score',
+            'count': 'Game Count'
+        }
+        best_openers_tbl = best_openers.rename(columns=col_rename_map)
+        worst_openers_tbl = worst_openers.rename(columns=col_rename_map)
+
+        best_md = best_openers_tbl.to_markdown(index=False, floatfmt=".2f")
+        worst_md = worst_openers_tbl.to_markdown(index=False, floatfmt=".2f")
+
+        # --- Generate Narrative ---
+        narrative = (
+            f"The analysis reveals distinct patterns. The best opening moves (those that minimize Player 2's response) "
+            f"tend to be shorter, often using fewer unique tiles. Conversely, the moves that give Player 2 the highest-scoring "
+            f"responses are typically longer plays, including bingos (7-tile plays), which open up the board significantly. "
+            f"This suggests a trade-off: a high-scoring opening for Player 1 may come at the cost of creating a high-scoring "
+            f"opportunity for Player 2."
+        )
+
+        update_status(status_widget, "Opening move optimization analysis complete.")
+        return {
+            'best_openers_table': best_md,
+            'worst_openers_table': worst_md,
+            'opening_optimization_narrative': narrative
+        }
+
+    except Exception as e:
+        update_status(status_widget, f"ERROR during opening move optimization analysis: {e}")
+        return None
+
+
+
+
 #************* --- Quadrant Analysis ************* ---
 
 
@@ -1448,7 +1996,7 @@ def generate_quadrant_analysis(df, status_widget):
         avg_percentages.columns = ['Quadrant', 'Average Percentage']
         avg_percentages['Quadrant'] = ['Q1 (Top-Right)', 'Q2 (Top-Left)', 'Q3 (Bottom-Left)', 'Q4 (Bottom-Right)']
         
-        table_md = avg_percentages.to_markdown(index=False)
+        table_md = avg_percentages.to_markdown(index=False, floatfmt=".2f")
         
         fig, ax = plt.subplots()
         ax.bar(avg_percentages['Quadrant'], avg_percentages['Average Percentage'])
@@ -1582,7 +2130,7 @@ def generate_dominant_quadrant_analysis(df, status_widget):
         table_df['Dominant Quadrant'] = table_df['Dominant Quadrant'].map(quadrant_name_map)
 
         # Convert the cleaned-up DataFrame to Markdown
-        table_md = table_df.to_markdown(index=False)
+        table_md = table_df.to_markdown(index=False, floatfmt=".2f")
         
         # --- Generate Grouped Bar Chart ---
         labels = [f"Q{i+1}" for i in range(4)] # Q1, Q2, Q3, Q4
@@ -1871,6 +2419,70 @@ def generate_quadrant_extremes_analysis(df, status_widget, footnote_manager):
         }
     except Exception as e:
         update_status(status_widget, f"ERROR during quadrant extremes analysis: {e}")
+        return None
+
+
+
+
+def generate_board_halves_extremes_analysis(df, status_widget, footnote_manager):
+    """
+    Generates a table for the min/max board half usage and their source games.
+
+    Args:
+        df (pd.DataFrame): The main dataframe with all game stats.
+        status_widget: The tkinter widget for status updates.
+        footnote_manager (FootnoteManager): The manager for creating footnotes.
+
+    Returns:
+        A dictionary containing markdown elements for the template, or None if an error occurs.
+    """
+    update_status(status_widget, "Generating board halves extremes analysis...")
+    try:
+        half_info = {
+            'top_half_perc': 'Top Half',
+            'bottom_half_perc': 'Bottom Half',
+            'left_half_perc': 'Left Half',
+            'right_half_perc': 'Right Half'
+        }
+        half_perc_cols = list(half_info.keys())
+
+        # --- Check for required columns ---
+        if not all(col in df.columns for col in half_perc_cols):
+            update_status(status_widget, f"ERROR: CSV is missing one of {half_perc_cols}.")
+            update_status(status_widget, "Please re-run 'Gather Stats' with the new BoardHalvesStatistic.")
+            return None
+
+        # --- Generate the simple table using to_markdown ---
+        mins = df[half_perc_cols].min()
+        maxs = df[half_perc_cols].max()
+        table_df = pd.DataFrame({
+            'Board Half': list(half_info.values()),
+            'Min Usage (%)': mins.values,
+            'Max Usage (%)': maxs.values
+        })
+        table_md = table_df.to_markdown(index=False, floatfmt=".2f")
+
+        # --- Find all source games and build a single footnote string ---
+        footnote_lines = []
+        for col, name in half_info.items():
+            min_idx = df[col].idxmin()
+            min_game = df.loc[min_idx, 'game_id']
+            footnote_lines.append(f"| Min usage for {name}: **{min_game}**")
+
+            max_idx = df[col].idxmax()
+            max_game = df.loc[max_idx, 'game_id']
+            footnote_lines.append(f"| Max usage for {name}: **{max_game}**")
+        
+        full_footnote_text = "\n" + "\n".join(footnote_lines)
+        footnote_ref = footnote_manager.add_footnote(full_footnote_text)
+
+        update_status(status_widget, "Board halves extremes analysis complete.")
+        return {
+            'board_halves_extremes_table': table_md,
+            'board_halves_extremes_footnote_ref': footnote_ref
+        }
+    except Exception as e:
+        update_status(status_widget, f"ERROR during board halves extremes analysis: {e}")
         return None
     
 
