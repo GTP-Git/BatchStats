@@ -1,6 +1,9 @@
 # Scrabble Game Analysis Report
 
 This report summarizes statistics gathered from the batch processing of .sgs game files.
+The program currently has statistics for {num_games_processed} games.
+The games are played between two AI opponents who only consider overall equity
+(the score of the play + the leave valuation) when choosing a play.
 
 
 
@@ -88,6 +91,27 @@ These are the top 10 types of opening moves that, on average, give Player 2 the 
 {opening_optimization_narrative}
 
 ---
+
+## The Impact of an Opening Bingo
+
+This section examines how Player 1's win rate is affected by whether their first move is a bingo.
+
+{opening_bingo_win_table}
+
+\FloatBarrier
+
+![Opening Bingo Win Rate Chart]({opening_bingo_win_chart_path})
+
+\FloatBarrier
+
+### Analysis
+
+{opening_bingo_win_narrative}
+
+
+---
+
+
 
 
 # Let's Get Physical: Scrabble Board Dynamics
