@@ -2,9 +2,8 @@
 
 # BatchStats.py
 # G
-# 22JUN25
-#Added Halves board stats
-#Added scoring response to opening move
+# 27JUN25
+#Added number of games analyzed
 # Schema updated 07JUN25
 
 
@@ -271,7 +270,7 @@ import concurrent.futures
 
 SGS_FILES_DIRECTORY = "/Users/gregmacbook/Documents/Batch Games"
 OUTPUT_CSV_FILE = "batch_stats_summary.csv"
-BINGO_MIN_TILES = 7 # Minimum number of tiles played to be considered a bingo
+BINGO_MIN_TILES = 7
 
 # --- Game Data Keys (based on observed .sgs file structure) ---
 # These keys provide a single point of reference for the raw data structure.
@@ -284,6 +283,8 @@ MOVE_PLAYER_INDEX_KEY = 'player'
 MOVE_SCORE_KEY = 'score'
 MOVE_IS_BINGO_FLAG_KEY = 'is_bingo'
 MOVE_TILES_PLAYED_KEY = 'tiles_played_from_rack'
+
+
 
 
 # =================================================================================================
@@ -590,6 +591,120 @@ class OpeningMoveAEINRSTResponseStatistic(BaseStatistic):
             "p1_opening_aeinrst_count": p1_aeinrst_count,
             "p2_aeinrst_response_score": p2_score
         }
+
+
+
+class OpeningBingoStatistic(BaseStatistic):
+    """
+    Determines if Player 1's first move was a bingo.
+    """
+    def get_column_names(self):
+        return ["p1_opened_with_bingo"]
+
+    def calculate(self, parsed_game):
+        move_history = parsed_game.get_move_history()
+        
+        # Find the first 'place' move for player 1
+        for move in move_history:
+            if move.get('move_type') == 'place' and move.get('player') == 1:
+                is_bingo = move.get(MOVE_IS_BINGO_FLAG_KEY, False)
+                # Fallback for older schemas if is_bingo key is missing
+                if is_bingo is None:
+                    tiles_played = move.get(MOVE_TILES_PLAYED_KEY, [])
+                    is_bingo = len(tiles_played) >= BINGO_MIN_TILES
+
+                return {"p1_opened_with_bingo": bool(is_bingo)}
+        
+        # If no opening move was made by P1 (e.g., game ended early)
+        return {"p1_opened_with_bingo": None}
+
+
+
+
+class AdvancedOpeningBingoStatistic(BaseStatistic):
+    """
+    [DEBUGGING VERSION]
+    Analyzes a specific "Aggressive TWS-Bait" opening bingo.
+    """
+    def get_column_names(self):
+        return ["p1_opening_bingo_type", "p2_response_score_adv"]
+
+    def calculate(self, parsed_game):
+        move_history = parsed_game.get_move_history()
+        if not move_history:
+            return {"p1_opening_bingo_type": None, "p2_response_score_adv": None}
+
+        p1_move_index = -1
+        p1_first_move = None
+        for i, move in enumerate(move_history):
+            if move.get('move_type') == 'place' and move.get('player') == 1:
+                p1_first_move = move
+                p1_move_index = i
+                break
+        
+        if not p1_first_move:
+            return {"p1_opening_bingo_type": None, "p2_response_score_adv": None}
+
+        p2_response_score = None
+        if p1_move_index + 1 < len(move_history):
+            p2_next_move = move_history[p1_move_index + 1]
+            if p2_next_move.get('player') == 2 and p2_next_move.get('move_type') == 'place':
+                p2_response_score = p2_next_move.get('score')
+
+        is_bingo = p1_first_move.get(MOVE_IS_BINGO_FLAG_KEY)
+        if is_bingo is None:
+            tiles_played = p1_first_move.get(MOVE_TILES_PLAYED_KEY, [])
+            is_bingo = len(tiles_played) >= BINGO_MIN_TILES
+        else:
+            is_bingo = bool(is_bingo)
+
+        if not is_bingo:
+            return {"p1_opening_bingo_type": "Non-Bingo", "p2_response_score_adv": p2_response_score}
+
+        # --- START OF DEBUGGING LOGIC ---
+        print(f"\n--- Found Opening Bingo in: {parsed_game.get_filename()} ---")
+        if not WORD_SET:
+            print(">>> CRITICAL: WORD_SET is empty! 'S' hook check will always fail.")
+        
+        word = p1_first_move.get('word', '').upper()
+        print(f"Word: {word}")
+
+        # Condition 1: 'S' back-hook exists
+        has_s_hook = (f"{word}S" in WORD_SET) if WORD_SET and word else False
+        print(f"1. Has 'S' Hook? -> {has_s_hook}")
+
+        # Condition 2: The last tile lands on N8 or H14
+        lands_on_target_square = False
+        positions = p1_first_move.get('positions', [])
+        direction = p1_first_move.get('direction')
+        last_tile_coords = None
+
+        if positions and direction:
+            if direction == 'H':
+                last_tile = max(positions, key=lambda p: p[1])
+                r, c, _ = last_tile
+                last_tile_coords = (r, c)
+                if (r, c) == (7, 13): # N8
+                    lands_on_target_square = True
+            elif direction == 'V':
+                last_tile = max(positions, key=lambda p: p[0])
+                r, c, _ = last_tile
+                last_tile_coords = (r, c)
+                if (r, c) == (13, 7): # H14
+                    lands_on_target_square = True
+        
+        print(f"2. Last Tile Coords: {last_tile_coords}")
+        print(f"   Lands on Target (N8 or H14)? -> {lands_on_target_square}")
+        
+        bingo_type = "Other Bingo"
+        if has_s_hook and lands_on_target_square:
+            bingo_type = "Aggressive TWS-Bait"
+            print(">>> SUCCESS: Classified as 'Aggressive TWS-Bait'!")
+        
+        print(f"Final Classification: {bingo_type}")
+        # --- END OF DEBUGGING LOGIC ---
+
+        return {"p1_opening_bingo_type": bingo_type, "p2_response_score_adv": p2_response_score}
 
 
 
@@ -999,6 +1114,7 @@ STATISTICS_TO_RUN = [
     TurnCountStatistic(),
     OpeningMoveResponseStatistic(),
     OpeningMoveAEINRSTResponseStatistic(),
+    OpeningBingoStatistic(),
 ]
 
 
@@ -1030,7 +1146,7 @@ def process_single_file(filepath):
         GameIDStatistic(), PlayerScoreStatistic(), BingoCountStatistic(),
         MaxTurnScoreStatistic(), QuadrantUsageStatistic(), BoardHalvesStatistic(),
         OpeningMoveStatistic(), TurnCountStatistic(), OpeningMoveResponseStatistic(),
-        OpeningMoveAEINRSTResponseStatistic(),
+        OpeningMoveAEINRSTResponseStatistic(), OpeningBingoStatistic(),
     ]
     square_usage_stat = SquareUsageStatistic()
     comeback_stat = ComebackAnalysisStatistic()
@@ -1051,7 +1167,6 @@ def process_single_file(filepath):
 
 
 
-# In "BatchStats  - F - 17JUN25 - More Quadrants":
 def process_all_sgs_files(directory, status_widget):
     """
     Orchestrates the entire process in parallel using a ProcessPoolExecutor.
@@ -1446,6 +1561,9 @@ def generate_analysis_report(status_widget):
     template_data = {}
     footnote_manager = FootnoteManager()
 
+    # Add the total number of games to the template data dictionary
+    template_data['num_games_processed'] = f"{len(df):,}"
+
     score_summary_results = generate_score_summary_analysis(df, status_widget)
     if not score_summary_results: return
     template_data.update(score_summary_results)
@@ -1465,6 +1583,10 @@ def generate_analysis_report(status_widget):
     opening_optimization_results = generate_opening_move_optimization_analysis(df, status_widget)
     if not opening_optimization_results: return
     template_data.update(opening_optimization_results)
+
+    opening_bingo_win_results = generate_opening_bingo_win_analysis(df, status_widget)
+    if not opening_bingo_win_results: return
+    template_data.update(opening_bingo_win_results)
 
     quadrant_results = generate_quadrant_analysis(df, status_widget)
     if not quadrant_results: return
@@ -1499,8 +1621,6 @@ def generate_analysis_report(status_widget):
     template_data.update(heatmap_results)
 
     # --- 3. Load Template and Populate ---
-    # THIS IS THE FIX: We add the rendered footnotes to the data dictionary
-    # BEFORE formatting the template.
     template_data['final_footnotes'] = footnote_manager.render_footnotes()
     
     template_filename = "report_template.md"
@@ -1968,6 +2088,103 @@ def generate_opening_move_optimization_analysis(df, status_widget):
     except Exception as e:
         update_status(status_widget, f"ERROR during opening move optimization analysis: {e}")
         return None
+
+
+
+def generate_opening_bingo_win_analysis(df, status_widget):
+    """
+    Analyzes Player 1's win rate based on whether their opening move was a bingo.
+
+    Args:
+        df (pd.DataFrame): The main dataframe with all game stats.
+        status_widget: The tkinter widget for status updates.
+
+    Returns:
+        A dictionary containing markdown elements for the template, or None if an error occurs.
+    """
+    update_status(status_widget, "Generating opening bingo win rate analysis...")
+    try:
+        chart_filename = "opening_bingo_win_chart.png"
+        required_cols = ['p1_opened_with_bingo', 'p1_score', 'p2_score']
+        if not all(col in df.columns for col in required_cols):
+            update_status(status_widget, f"ERROR: CSV is missing one of {required_cols}.")
+            update_status(status_widget, "Please re-run 'Gather Stats' with OpeningBingoStatistic.")
+            return None
+
+        # Filter out games where P1 didn't make an opening move
+        analysis_df = df.dropna(subset=['p1_opened_with_bingo']).copy()
+        analysis_df['p1_opened_with_bingo'] = analysis_df['p1_opened_with_bingo'].astype(bool)
+
+        if analysis_df.empty:
+            update_status(status_widget, "No valid games found for opening bingo analysis.")
+            return {
+                'opening_bingo_win_table': "No valid games found for this analysis.",
+                'opening_bingo_win_chart_path': "",
+                'opening_bingo_win_narrative': "Not enough data to perform analysis."
+            }
+
+        # Determine winner
+        analysis_df['p1_won'] = analysis_df['p1_score'] > analysis_df['p2_score']
+
+        # Group by the opening move type and calculate win rate and count
+        grouped = analysis_df.groupby('p1_opened_with_bingo')['p1_won'].agg(['mean', 'count']).reset_index()
+        grouped['mean'] = grouped['mean'] * 100 # Convert to percentage
+
+        # --- Format Table for Report ---
+        grouped['p1_opened_with_bingo'] = grouped['p1_opened_with_bingo'].map({
+            True: 'Bingo Opener',
+            False: 'Non-Bingo Opener'
+        })
+        grouped.rename(columns={
+            'p1_opened_with_bingo': "P1 Opening Move Type",
+            'mean': 'P1 Win Rate (%)',
+            'count': 'Game Count'
+        }, inplace=True)
+        table_md = grouped.to_markdown(index=False, floatfmt=".2f")
+
+        # --- Generate Bar Chart ---
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.bar(grouped["P1 Opening Move Type"], grouped['P1 Win Rate (%)'], color=['lightcoral', 'skyblue'])
+        
+        ax.set_xlabel("Player 1's Opening Move Type")
+        ax.set_ylabel("Player 1 Win Rate (%)")
+        ax.set_title("Impact of an Opening Bingo on P1's Win Rate")
+        ax.set_ylim(0, 100) # Win rate is a percentage
+        ax.grid(axis='y', linestyle='--', alpha=0.7)
+        
+        plt.savefig(chart_filename)
+        plt.close(fig)
+
+        # --- Generate Narrative ---
+        bingo_openers_count = grouped[grouped['P1 Opening Move Type'] == 'Bingo Opener']['Game Count'].iloc[0] if not grouped[grouped['P1 Opening Move Type'] == 'Bingo Opener'].empty else 0
+        bingo_win_rate = grouped[grouped['P1 Opening Move Type'] == 'Bingo Opener']['P1 Win Rate (%)'].iloc[0] if bingo_openers_count > 0 else 0
+        non_bingo_win_rate = grouped[grouped['P1 Opening Move Type'] == 'Non-Bingo Opener']['P1 Win Rate (%)'].iloc[0] if not grouped[grouped['P1 Opening Move Type'] == 'Non-Bingo Opener'].empty else 0
+        
+        win_rate_diff = bingo_win_rate - non_bingo_win_rate
+        
+        narrative = (
+            f"Playing a bingo on the opening turn significantly impacts the game's outcome. "
+            f"When Player 1 opens with a bingo, their win rate is **{bingo_win_rate:.2f}%**. "
+            f"When they do not, their win rate is **{non_bingo_win_rate:.2f}%**. "
+            f"This represents a **{abs(win_rate_diff):.2f} percentage point** {'increase' if win_rate_diff > 0 else 'decrease'} in the likelihood of winning, "
+            f"underscoring the powerful advantage gained from a high-scoring, board-opening first play. "
+            f"This analysis is based on **{bingo_openers_count:,}** games with a bingo opener."
+        )
+
+        update_status(status_widget, "Opening bingo win rate analysis complete.")
+        return {
+            'opening_bingo_win_table': table_md,
+            'opening_bingo_win_chart_path': chart_filename,
+            'opening_bingo_win_narrative': narrative
+        }
+
+    except Exception as e:
+        update_status(status_widget, f"ERROR during opening bingo win rate analysis: {e}")
+        return None
+
+
+
+
 
 
 
